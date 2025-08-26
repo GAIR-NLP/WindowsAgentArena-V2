@@ -1,0 +1,11 @@
+{
+    "OPENAI_API_KEY": "EMPTY",
+    "OPENAI_BASE_URL": "http://localhost:8030/v1",
+    "OPENAI_API_KEY_FOR_CHECK_SETUP": "",
+    "OPENAI_BASE_URL_FOR_CHECK_SETUP": "",
+    "model": "henryhe0123/PC-Agent-E",
+    "trial_id": 9,
+    "max_steps": 30,
+    "agent": "pcagent",
+    "CONCURRENT_NUM": 4
+}
