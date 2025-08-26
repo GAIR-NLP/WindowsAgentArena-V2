@@ -45,8 +45,8 @@
     "expected": {
       "type": "rule",
       "rules": {
-        "type": "description",
-        "description": "Play Puzzle Game 2048. Use your arrow keys to move the tiles."
+        "type": "url",
+        "description": "https://www.mathsisfun.com/games/2048.html"
       }
     }
   }

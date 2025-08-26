@@ -31,7 +31,7 @@
         "expected": {
             "type": "rule",
             "rules": {
-                "expected": "Documents"
+                "expected": "Documents - File Explorer"
             }
         }
     }
