@@ -246,6 +246,11 @@ src/win-arena-container/client/mm_agents/navi/screenparsing_oss/figs/test_parser
 # vs code python debugger stuff
 src/win-arena-container/client/.vscode/launch.json
 
+*.env
+prepare/
+logs/
+src/win-arena-container/client/evaluation_examples_windows/examples/claude/
+
 # problematic tasks that work for some people and not for others
 # src/win-arena-container/client/evaluation_examples_windows/examples/libreoffice_calc/3a7c8185-25c1-4941-bd7b-96e823c9f21f-wos.json
 # src/win-arena-container/client/evaluation_examples_windows/examples/libreoffice_calc/5b5434c6-560c-47a1-a89f-929c688448f5-wos.json
