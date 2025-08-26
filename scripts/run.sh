@@ -23,12 +23,16 @@ rdp_port=3390
 start_client=true
 agent="navi"
 model="gpt-4-vision-preview"
+trial_id=0
+max_steps=30
 som_origin="oss"
 a11y_backend="uia"
 gpu_enabled=false
-OPENAI_API_KEY=""
 AZURE_API_KEY=""
 AZURE_ENDPOINT=""
+concurrent=false
+concurrent_idx=0 # 0 means no concurrent test
+check_setup=false
 
 # Parse the command line arguments
 while [[ $# -gt 0 ]]; do
@@ -93,8 +97,16 @@ while [[ $# -gt 0 ]]; do
             agent=$2
             shift 2
             ;;
+        --trial-id)
+            trial_id=$2
+            shift 2
+            ;;
         --model)
             model=$2
+            shift 2
+            ;;
+        --max-steps)
+            max_steps=$2
             shift 2
             ;;
         --som-origin)
@@ -113,6 +125,10 @@ while [[ $# -gt 0 ]]; do
             OPENAI_API_KEY="$2"
             shift 2
             ;;
+        --openai-base-url)   
+            OPENAI_BASE_URL="$2"
+            shift 2
+            ;;
         --azure-api-key)
             AZURE_API_KEY="$2"
             shift 2
@@ -123,6 +139,18 @@ while [[ $# -gt 0 ]]; do
             ;;
         --mode)
             mode=$2
+            shift 2
+            ;;
+        --concurrent)
+            concurrent=$2
+            shift 2
+            ;;
+        --concurrent-idx)
+            concurrent_idx=$2
+            shift 2
+            ;;
+        --check-setup)
+            check_setup=$2
             shift 2
             ;;
         --help)
@@ -143,14 +171,19 @@ while [[ $# -gt 0 ]]; do
             echo "  --rdp-port <port> : Port to expose for connecting to the VM using RDP (default: 3390)"
             echo "  --start-client <true/false> : Whether to start the arena client process (default: true)"
             echo "  --agent <navi> : Agent to use for the arena container (default: navi)"
+            echo "  --trial-id <trial_id> : The trial ID to use (default: 0)"
             echo "  --model <model>: The model to use (default: gpt-4-vision-preview, available options are: gpt-4o-mini, gpt-4-vision-preview, gpt-4o, gpt-4-1106-vision-preview)"
+            echo "  --max-steps <max_steps>: The maximum number of steps to run the client process (default: 30)"
             echo "  --som-origin <som_origin>: The SoM (Set-of-Mark) origin to use (default: oss, available options are: oss, a11y, mixed-oss, omni, mixed-omni)"
             echo "  --a11y-backend <a11y_backend>: The a11y accessibility backend to use (default: uia, available options are: uia, win32)"
             echo "  --gpu-enabled <true/false> : Enable GPU support (default: false)"
             echo "  --openai-api-key <key> : The OpenAI API key"
+            echo "  --openai-base-url <url> : The OpenAI Base URL"  
             echo "  --azure-api-key <key> : The Azure OpenAI API key"
             echo "  --azure-endpoint <url> : The Azure OpenAI Endpoint"
             echo "  --mode <dev/azure> : Mode (default: azure)"
+            echo "  --concurrent <true/false> : Whether to run in concurrent mode (default: false)"
+            echo "  --concurrent-idx <concurrent_idx> : The concurrent index for the instance"
             exit 0
             ;;
         *)
@@ -184,18 +217,58 @@ if ! docker images | grep -q -e $winarena_full_image_name; then
 fi
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-
 # Resolve paths
 vm_setup_image_path="$SCRIPT_DIR/../src/win-arena-container/vm/image"
 vm_storage_mount_path="$SCRIPT_DIR/../src/win-arena-container/vm/storage"
 server_mount_path="$SCRIPT_DIR/../src/win-arena-container/vm/setup"
 client_mount_path="$SCRIPT_DIR/../src/win-arena-container/client"
+test_custom_path="$client_mount_path/evaluation_examples_windows/test_custom.json"
 
 # Solve absolute path
 vm_setup_image_path=$(getrealpath $vm_setup_image_path)
 vm_storage_mount_path=$(getrealpath $vm_storage_mount_path)
 server_mount_path=$(getrealpath $server_mount_path)
 client_mount_path=$(getrealpath $client_mount_path)
+test_custom_path=$(getrealpath $test_custom_path)
+
+# Helper functions to detect and allocate free host ports
+is_port_in_use() {
+    local port=$1
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -iTCP:${port} -sTCP:LISTEN -t >/dev/null 2>&1
+    else
+        ss -tulpn 2>/dev/null | grep -q ":${port} "
+    fi
+}
+
+find_available_port() {
+    local port=$1
+    while is_port_in_use $port; do
+        port=$((port+1))
+    done
+    echo $port
+}
+
+# update variables for concurrent mode
+if [ "$concurrent" = true ]; then
+   start_browser_port=$((9016 + ${concurrent_idx}))
+   start_rdp_port=$((3390 + ${concurrent_idx}))
+   browser_port=$(find_available_port $start_browser_port)
+   rdp_port=$(find_available_port $start_rdp_port)
+   
+   container_name="winarena_${concurrent_idx}"
+   vm_storage_mount_path="$SCRIPT_DIR/../src/win-arena-container/vm/storage_${concurrent_idx}"
+   test_custom_path="$client_mount_path/evaluation_examples_windows/concurrent_eval/test_custom_${concurrent_idx}.json"
+   
+   echo "Using concurrent index: $concurrent_idx"
+   echo "vm storage path: $vm_storage_mount_path"
+   echo "Assigned browser port: $browser_port"
+   echo "Assigned RDP port: $rdp_port"
+fi
+
+echo "----- Concurrent mode: $concurrent -----"
+echo "----- Concurrent index: $concurrent_idx -----"
+echo "Using container name: $container_name"
 
 echo "Using VM Setup Image path: $vm_setup_image_path"
 echo "Using VM storage mount path: $vm_storage_mount_path"
@@ -221,7 +294,10 @@ build_container_image() {
 
 # Function to invoke Docker container
 invoke_docker_container() {
-    docker_command="docker run"
+    docker_command="docker run --add-host host.docker.internal:host-gateway"
+    
+    # for proxy (if you are using a proxy, you can uncomment this)
+    # docker_command+=" -e HTTPS_PROXY=\"http://host.docker.internal:7890\" -e NO_PROXY=\"127.0.0.1,localhost\""
 
     # Add interactive and TTY flags
     if [ -t 1 ]; then
@@ -230,6 +306,9 @@ invoke_docker_container() {
 
     # Ensure the container is removed after it exits
     docker_command+=" --rm"
+
+    # 跨平台限制 FD 上限
+    docker_command+=" --ulimit nofile=1048576:1048576"
 
     # Map ports from the container to the host
     docker_command+=" -p ${browser_port}:8006"
@@ -285,9 +364,19 @@ invoke_docker_container() {
         docker_command+=" --gpus all"
     fi
 
+    # Assign CPU core
+    if [ "$concurrent" = true ]; then
+        start_cpu=$((concurrent_idx*16+1))
+        end_cpu=$((concurrent_idx*16+16))
+        docker_command+=" --cpuset-cpus=${start_cpu}-${end_cpu}"
+    fi
+
     # OpenAI API Key priotitized over Azure API Key
     if [ -n "$OPENAI_API_KEY" ]; then
         docker_command+=" -e OPENAI_API_KEY=$OPENAI_API_KEY"
+        if [ -n "$OPENAI_BASE_URL" ]; then    
+            docker_command+=" -e OPENAI_BASE_URL=$OPENAI_BASE_URL"
+        fi
     else
         if [ -n "$AZURE_API_KEY" ]; then
             docker_command+=" -e AZURE_API_KEY=$AZURE_API_KEY"
@@ -302,7 +391,7 @@ invoke_docker_container() {
     docker_command+=" $winarena_full_image_name:$winarena_image_tag"
     
     # Set the entrypoint arguments
-    entrypoint_args=" -c './entry.sh --prepare-image $prepare_image --start-client $start_client --agent $agent --model $model --som-origin $som_origin --a11y-backend $a11y_backend'"
+    entrypoint_args=" -c './entry.sh --prepare-image $prepare_image --start-client $start_client --agent $agent --model $model --max-steps $max_steps --som-origin $som_origin --a11y-backend $a11y_backend --trial-id $trial_id --concurrent $concurrent --concurrent-idx $concurrent_idx --check-setup $check_setup'"
     if [ "$interactive" = true ]; then
         entrypoint_args=""
     fi
