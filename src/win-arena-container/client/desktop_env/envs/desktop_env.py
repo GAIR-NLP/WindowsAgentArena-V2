@@ -49,12 +49,14 @@ class DesktopEnv(gym.Env):
             snapshot_name: str = "init_state",
             action_space: str = "computer_13",
             cache_dir: str = "cache",
-            screen_size: Tuple[int] = (1920, 1080),
+            screen_size: Tuple[int] = (1280, 720),
             headless: bool = False,
             a11y_backend: str = "uia",
             require_a11y_tree: bool = True,
             require_terminal: bool = False,
             emulator_ip: str = None,
+            not_navi: bool = False,
+            is_azure: bool = False
     ):
         """
         Args:
@@ -76,6 +78,9 @@ class DesktopEnv(gym.Env):
         self.a11y_backend = a11y_backend
         self.require_a11y_tree = require_a11y_tree
         self.require_terminal = require_terminal
+        self.not_navi = not_navi
+        self.is_azure = is_azure
+        self.screen_size = screen_size
 
         # Initialize emulator and controller
         logger.info("Initializing...")
@@ -112,8 +117,9 @@ class DesktopEnv(gym.Env):
 
     @property
     def vm_screen_size(self):
-        return self.controller.get_vm_screen_size()
-
+        size_json = self.controller.get_vm_screen_size()
+        return size_json["width"], size_json["height"]
+    
     def _wait_emulator(self):
         """
         Continuously calls `get_probe` until it returns True, indicating the VM is ready.
@@ -156,21 +162,42 @@ class DesktopEnv(gym.Env):
         if screenshot is None:
             logger.error("Failed to get screenshot!")
 
+        # Resize image to self.screen_size
+        try:
+            from PIL import Image
+            import io
+            
+            # Create image object from byte stream
+            image = Image.open(io.BytesIO(screenshot))
+            
+            # Resize
+            resized_image = image.resize(self.screen_size, Image.LANCZOS)
+            
+            # Convert resized image back to byte stream
+            buffer = io.BytesIO()
+            resized_image.save(buffer, format="PNG")
+            screenshot = buffer.getvalue() # bytes
+        except Exception as e:
+            logger.error(f"Failed to resize screenshot: {e}")
         return screenshot
 
     def _get_obs(self):
         screenshot = self._get_screenshot()
-        # screenshot = None
-        # print("screenshot done")
-        accessibility_tree = self.controller.get_accessibility_tree(backend=self.a11y_backend) if self.require_a11y_tree else None
-        # accessibility_tree = "test"
-        # accessibility_tree = None
-        # print("accessibility_tree done")
-        terminal = self.controller.get_terminal_output() if self.require_terminal else None
-        # terminal = None
+        
+        if self.not_navi:
+            accessibility_tree = None
+            terminal = None
+        else:
+            accessibility_tree = self.controller.get_accessibility_tree(backend=self.a11y_backend) if self.require_a11y_tree else None
+            terminal = self.controller.get_terminal_output() if self.require_terminal else None
+        
         obs = self.controller.get_obs_winagent()
         if obs is not None:
             window_image, window_title, window_rect, window_names_str, computer_clipboard, human_input = obs
+            if self.not_navi:
+                window_image = None
+                human_input = None
+            
             return {
                 "screenshot": screenshot,
                 "accessibility_tree": accessibility_tree,
@@ -241,26 +268,19 @@ class DesktopEnv(gym.Env):
                 or (len(self.metric) == len(self.result_getter) == len(self.expected_getter) == len(
                     self.metric_options)))
 
-    def reset(self, task_config: Optional[Dict[str, Any]] = None, seed=None, options=None) -> Dict[str, Any]:
+    def reset(self, domain = None, task_config: Optional[Dict[str, Any]] = None, seed=None, options=None) -> Dict[str, Any]:
         logger.info("Resetting environment...")
 
-        logger.info("Switching task...")
-
-        logger.info("Setting counters...")
         self._traj_no += 1
         self._step_no = 0
         self.action_history.clear()
 
-        logger.info("Reverting to snapshot to {}...".format(self.snapshot_name))
-
         if self.remote_vm:
             # TODO: Implement this
             # self.controller.revert_to_snapshot(self.snapshot_name)
-            
             logger.error("Not implemented! Reverting to snapshot is not supported for remote VMs! Closing all applications instead")
+            
             self.setup_controller._close_all_setup()
-
-        time.sleep(5)
 
         logger.info("Starting emulator...")
         if self.remote_vm:
@@ -284,11 +304,59 @@ class DesktopEnv(gym.Env):
             self.setup_controller.reset_cache_dir(self.cache_dir)
             logger.info("Setting up environment...")
             self.setup_controller.setup(self.config)
-            time.sleep(5)
             logger.info("Environment setup complete.")
 
+        if self.is_azure:
+            time.sleep(360)
+        else:
+            time.sleep(60)
+
+        try_time = 60
         observation = self._get_obs()
+        while try_time > 0:
+            logger.error("Observation is None. Waiting a little to do next step.")
+            time.sleep(15)
+            observation = self._get_obs()
+            if observation is not None:
+                break
+            try_time -= 1
         return observation
+
+    def resize_action(self, action):
+        # Extract all x,y coordinates and resize them
+        import re
+        
+        # Get source and target dimensions
+        src_width, src_height = self.screen_size
+        dst_width, dst_height = self.vm_screen_size
+        
+        # Calculate scaling ratios
+        scale_x = dst_width / src_width
+        scale_y = dst_height / src_height
+        
+        # Use regex to find all coordinate pairs in the form x,y including decimal forms
+        # This pattern will match forms like 100,200 or 10.5,20.3, regardless of parentheses
+        pattern = r'(\d+\.?\d*)\s*,\s*(\d+\.?\d*)'
+        
+        def replace_coords(match):
+            x = float(match.group(1))
+            y = float(match.group(2))
+            
+            # Scale coordinates proportionally
+            new_x = x * scale_x
+            new_y = y * scale_y
+            
+            # Maintain original format
+            return f'{new_x}, {new_y}'
+        
+        # Replace all found coordinate pairs
+        resized_action = re.sub(pattern, replace_coords, action)
+        
+        print(f"Original action: {action}")
+        print(f"Resized action: {resized_action}")
+        
+        return resized_action
+
 
     def step(self, action, pause=0.5):
         self._step_no += 1
@@ -316,17 +384,29 @@ class DesktopEnv(gym.Env):
                     self.controller.execute_action(action)
                 else:
                     # the set of all possible python commands insides `pyautogui`
+                    if self.vm_screen_size != self.screen_size:
+                        action = self.resize_action(action)
                     self.controller.execute_python_command(action)
             elif self.action_space == "code_block":
                 self.controller.execute_python_windows_command(action)
             else:
                 raise ValueError("Unknown action space: {}".format(self.action_space))
         # wait a little before taking the next observation
+        
         time.sleep(pause)
+        
+        try_time = 30
         observation = self._get_obs()
+        while try_time > 0:
+            logger.error("Observation is None. Waiting a little to do next step.")
+            time.sleep(15)
+            observation = self._get_obs()
+            if observation is not None:
+                break
+            try_time -= 1
 
         return observation, reward, done, info
-
+    
     def evaluate(self):
         """
         Evaluate whether the task is successfully completed.
@@ -384,9 +464,6 @@ class DesktopEnv(gym.Env):
                 return 0
             expected_state = self.expected_getter(self, self.evaluator["expected"]) if "expected" in self.evaluator \
                 else None
- 
-            # logger.info(f"RESULT STATE: {result_state}")
-            # logger.info(f"EXPECTED STATE: {expected_state}")
 
             metric: float = self.metric(result_state, expected_state,
                                         **self.metric_options) if expected_state is not None \

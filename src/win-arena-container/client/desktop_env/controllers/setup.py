@@ -348,7 +348,7 @@ class SetupController:
             if response.status_code == 200:
                 logger.info("Command executed successfully: %s", response.text)
             else:
-                logger.error(f"Failed to activate window {window_name}. Status code: %s", response.text)
+                logger.info(f"Failed to activate window {window_name}. Status code: {response.text}")
         except requests.exceptions.RequestException as e:
             logger.error("An error occurred while trying to send the request: %s", e)
 
@@ -480,9 +480,9 @@ class SetupController:
                     browser = p.chromium.connect_over_cdp(remote_debugging_url)
                     # break
                 except Exception as e:
-                    if attempt < 14:
+                    if attempt < 29:
                         logger.error(f"Attempt {attempt + 1}: Failed to connect, retrying. Error: {e}")
-                        # time.sleep(10)
+                        time.sleep(25)
                         continue
                     else:
                         logger.error(f"Failed to connect after multiple attempts: {e}")
@@ -520,7 +520,7 @@ class SetupController:
         remote_debugging_url = f"http://{host}:{port}"
         logger.info("Connect to Microsoft Edge @: %s", remote_debugging_url)
         logger.debug("PLAYWRIGHT ENV: %s", repr(os.environ))
-        for attempt in range(15):
+        for attempt in range(30):
             if attempt > 0:
                 time.sleep(5)
 
@@ -530,7 +530,7 @@ class SetupController:
                     browser = p.chromium.connect_over_cdp(remote_debugging_url)
                     # break
                 except Exception as e:
-                    if attempt < 14:
+                    if attempt < 29:
                         logger.error(f"Attempt {attempt + 1}: Failed to connect, retrying. Error: {e}")
                         continue
                     else:
@@ -570,12 +570,12 @@ class SetupController:
         remote_debugging_url = f"http://{host}:{port}"
         with sync_playwright() as p:
             browser = None
-            for attempt in range(15):
+            for attempt in range(30):
                 try:
                     browser = p.chromium.connect_over_cdp(remote_debugging_url)
                     break
                 except Exception as e:
-                    if attempt < 14:
+                    if attempt < 29:
                         logger.error(f"Attempt {attempt + 1}: Failed to connect, retrying. Error: {e}")
                         time.sleep(5)
                     else:
@@ -701,12 +701,12 @@ class SetupController:
         remote_debugging_url = f"http://{host}:{port}"
         with sync_playwright() as p:
             browser = None
-            for attempt in range(15):
+            for attempt in range(30):
                 try:
                     browser = p.chromium.connect_over_cdp(remote_debugging_url)
                     break
                 except Exception as e:
-                    if attempt < 14:
+                    if attempt < 29:
                         logger.error(f"Attempt {attempt + 1}: Failed to connect, retrying. Error: {e}")
                         time.sleep(5)
                     else:

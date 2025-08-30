@@ -1,6 +1,9 @@
 import json
 import logging
 import random
+import shutil
+import time
+import os
 from typing import Any, Dict, Optional
 
 import requests
@@ -114,7 +117,8 @@ class PythonController:
                 logger.error("Failed to get accessibility tree. Status code: %d", response.status_code)
                 return None
         except requests.Timeout:
-            logger.error("Request timed out while trying to get accessibility tree.")
+            # logger.error("Request timed out while trying to get accessibility tree.")
+            raise TimeoutError("Request timed out while trying to get accessibility tree.")
             return None
 
     def get_file(self, file_path: str):
@@ -198,10 +202,12 @@ class PythonController:
 
         try:
             response = requests.post(self.http_server + "/execute", headers=headers, data=payload, timeout=90)
-            if response.status_code == 200:
+            response_json = response.json()
+            return_code = response_json["returncode"]
+            if return_code == 0:
                 logger.info("Command executed successfully: %s", response.text)
             else:
-                logger.error("Failed to execute command. Status code: %d", response.status_code)
+                logger.error("Failed to execute command. Return code: %d", return_code)
             return response.json()
         except requests.exceptions.RequestException as e:
             logger.error("An error occurred while trying to execute the command: %s", e)

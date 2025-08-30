@@ -324,7 +324,9 @@ def is_cookie_deleted(cookie_data, rule):
     """
     Check if the cookie is deleted.
     """
-
+    if cookie_data is None or len(cookie_data) == 0:
+        return 1.
+    
     if rule['type'] == 'domains':
         cookies_domains = [cookie[1] for cookie in cookie_data]
         for domain in rule['domains']:
@@ -356,7 +358,29 @@ def is_shortcut_on_desktop(shortcuts: Dict[str, str], rule):
                 pass
         return 0.
     elif rule['type'] == 'url':
-        raise TypeError(f"{rule['type']} not support yet!")
+        for shortcut_path, shortcut_content in shortcuts.items():
+            try:
+                print("shortcut_content: {}".format(shortcut_content))
+                print("shortcut_path: {}".format(shortcut_path))
+                # Try to extract URL from JSON format
+                shortcut_data = json.loads(shortcut_content)
+                if 'data' in shortcut_data and 'url' in shortcut_data['data']:
+                    if compare_urls(rule['url'], shortcut_data['data']['url']):
+                        return 1.
+                # Search for URL format directly in content
+                elif "URL=" in shortcut_content:
+                    url_line = next((line for line in shortcut_content.split('\n') if line.startswith("URL=")), None)
+                    if url_line and compare_urls(rule['url'], url_line[4:]):  # Skip "URL=" prefix
+                        return 1.
+            except:
+                # Try regex pattern to match URL format
+                try:
+                    url_match = re.search(r"URL=(.+?)(\n|$)", shortcut_content)
+                    if url_match and compare_urls(rule['url'], url_match.group(1)):
+                        return 1.
+                except:
+                    pass
+        return 0.
     elif rule['type'] == 'id':
         raise TypeError(f"{rule['type']} not support yet!")
     else:
