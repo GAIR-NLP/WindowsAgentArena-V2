@@ -2,7 +2,7 @@ $ErrorActionPreference = "Continue" # until downloading from mirrors is more sta
 
 # Section - General Setup
 $shortcutShared = "C:\Users\Docker\Desktop\Setup"
-$scriptFolder = "\\host.lan\Data"
+$scriptFolder = "C:\oem"
 $toolsFolder = "C:\Users\$env:USERNAME\Tools"
 
 # Load the shared setup-tools module

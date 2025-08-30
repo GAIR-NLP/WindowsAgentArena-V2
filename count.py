@@ -1,5 +1,6 @@
 import os
 import json
+import argparse
 
 
 def count_files_and_calculate_average(result_dir, isroot=False):
@@ -45,7 +46,15 @@ def count_files_and_calculate_average(result_dir, isroot=False):
         print(path)
     print(f"Average score in results.json files: {average_score}\n")
 
-result_dir = "src/win-arena-container/client/results/1/pcagent" # replace with your result directory
+
+# Parse command line arguments
+parser = argparse.ArgumentParser(description='Count evaluation results')
+parser.add_argument('--trial_id', type=str, required=True, help='Trial ID')
+parser.add_argument('--agent', type=str, default='pcagent', help='Agent type for evaluation')
+args = parser.parse_args()
+
+# Automatically concatenate the result directory path
+result_dir = f"src/win-arena-container/client/results/{args.trial_id}/{args.agent}"
 
 count_files_and_calculate_average(result_dir, True)
 

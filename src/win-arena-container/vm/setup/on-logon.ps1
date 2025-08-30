@@ -1,4 +1,4 @@
-$scriptFolder = "\\host.lan\Data"
+$scriptFolder = "C:\oem"
 $pythonScriptFile = "$scriptFolder\server\main.py"
 $pythonServerPort = 5000
 

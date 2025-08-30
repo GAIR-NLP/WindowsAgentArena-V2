@@ -248,6 +248,8 @@ src/win-arena-container/client/.vscode/launch.json
 prepare/
 logs/
 src/win-arena-container/client/evaluation_examples_windows/examples/claude/
+src/win-arena-container/client/evaluation_examples_windows/task_descriptions.json
+src/win-arena-container/client/evaluation_examples_windows/test_claude.json
 
 # problematic tasks that work for some people and not for others
 # src/win-arena-container/client/evaluation_examples_windows/examples/libreoffice_calc/3a7c8185-25c1-4941-bd7b-96e823c9f21f-wos.json
