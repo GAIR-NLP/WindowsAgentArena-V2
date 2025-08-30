@@ -2,43 +2,52 @@
 import datetime
 import json
 import logging
-import os
+import cv2
+import numpy as np
+import base64
 import time
-import traceback
+import shutil
 from trajectory_recorder import TrajectoryRecorder
+from check_setup import check_setup_state_has_error
 
 logger = logging.getLogger("desktopenv.experiment")
 
-# Open the JSON file
-with open("./settings.json", "r") as file:
-    # Load the JSON data from the file
-    data = json.load(file)
-time_limit = data["time_limit"]
 
-def run_single_example(agent, env, example, max_steps, instruction, args, example_result_dir, scores):
+def run_single_example(agent, env, example, max_steps, domain, example_id, instruction, args, example_result_dir, scores):
     agent.reset()
-    obs = env.reset(task_config=example)
+    try:
+        obs = env.reset(domain=domain, task_config=example)
+    except Exception as e:
+        if args.check_setup:
+            error_message = str(e)
+            print(f"Fail to setup environment: {error_message}")
+            # remove example_result_dir
+            shutil.rmtree(example_result_dir)
+            # exit the program
+            exit(1)
+        else:
+            raise e
+    
     done = False
     step_idx = 0
 
-    #env.controller.start_recording()
-    start_time = datetime.datetime.now()
-    
+    # check if the setup is successful 
+    if args.check_setup:
+        if obs is None or check_setup_state_has_error(domain, obs["screenshot"]): 
+            print("Setup environment finished, but error detected.")
+            # remove example_result_dir
+            shutil.rmtree(example_result_dir)
+            # exit the program
+            exit(1)
+            
     # Initialize recorder, which will save the trajectory as a JSON & HTML in {example_result_dir}/traj.(jsonl,html)
     recorder = TrajectoryRecorder(example_result_dir)
-    
-    # Record initial state
-    init_timestamp = start_time.strftime("%Y%m%d@%H%M%S")
-    recorder.record_init(obs, example, init_timestamp)
-    
+
+    scores = []   
     while not done and step_idx < max_steps:
         if obs is None:
-            logger.error("Observation is None. Waiting a little to do next step.")
-            time.sleep(5)
-            step_idx += 1
-            continue
-
-        logger.info("Agent: Thinking...")
+            raise Exception("Observation is None.")
+            
         response, actions, logs, computer_update_args = agent.predict(
             instruction,
             obs
@@ -50,43 +59,32 @@ def run_single_example(agent, env, example, max_steps, instruction, args, exampl
         
         # step environment with agent actions 
         for action in actions:
+            logger.info("\n\nStep %d: %s", step_idx + 1, action)
+
             # Capture the timestamp before executing the action
             action_timestamp = datetime.datetime.now().strftime("%Y%m%d@%H%M%S")
-            elapsed_timestamp = f"{datetime.datetime.now() - start_time}"
-            logger.info("Step %d: %s", step_idx + 1, action)
-            
-            obs, reward, done, info = env.step(action, args.sleep_after_execution)
 
-            logger.info("Reward: %.2f", reward)
-            logger.info("Done: %s", done)
-            
             # Record step data
             recorder.record_step(
                 obs, 
                 logs,
                 step_idx,
                 action_timestamp,
-                elapsed_timestamp,
-                action,
-                reward,
-                done,
-                info
+                action
             )
+            obs, reward, done, info = env.step(action, args.sleep_after_execution)
 
             if done:
                 logger.info("The episode is done.")
                 break
         # inc step counter
         step_idx += 1
-    
+
     logger.info("Running evaluator(s)...")
     result = env.evaluate()
     logger.info("Result: %.2f", result)
-    scores.append(result)
+    scores.append((step_idx, result))
 
-    with open(os.path.join(example_result_dir, "result.txt"), "w", encoding="utf-8") as f:
-        f.write(f"{result}\n")
-    
     # Record final results
-    recorder.record_end(result, start_time)
-    # env.controller.end_recording(os.path.join(example_result_dir, "recording.mp4"))
+    final_timestamp = datetime.datetime.now().strftime("%Y%m%d@%H%M%S")
+    recorder.record_end(scores, obs, step_idx, final_timestamp)

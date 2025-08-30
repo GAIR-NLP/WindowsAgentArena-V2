@@ -17,6 +17,8 @@ from tqdm import tqdm
 import lib_run_single
 from desktop_env.envs.desktop_env import DesktopEnv
 from mm_agents.navi.agent import NaviAgent
+from mm_agents.pcagent.agent import PCAgent
+from mm_agents.uitars.agent import UITARSAgent
 import requests
 import time
 
@@ -67,7 +69,18 @@ def setup_logging(args):
 
 logger = logging.getLogger("desktopenv.experiment")
 
+def str_to_bool(value):
+    if isinstance(value, bool):
+        return value
+    if value.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif value.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError(f'Boolean value expected, got: {value}')
+
 def config() -> argparse.Namespace:
+    
     parser = argparse.ArgumentParser(
         description="Run end-to-end evaluation on the benchmark"
     )
@@ -88,14 +101,15 @@ def config() -> argparse.Namespace:
         default="a11y_tree",
         help="Observation type",
     )
-    parser.add_argument("--screen_width", type=int, default=1920)
-    parser.add_argument("--screen_height", type=int, default=1200)
-    parser.add_argument("--sleep_after_execution", type=float, default=3)
+    parser.add_argument("--screen_width", type=int, default=1280)
+    parser.add_argument("--screen_height", type=int, default=720)
+    parser.add_argument("--sleep_after_execution", type=float, default=5)
     parser.add_argument("--max_steps", type=int, default=15)
     parser.add_argument("--a11y_backend", type=str, default="uia") # "uia" or "win32"
 
     # agent config
-    parser.add_argument("--agent_name", type=str, default="navi")
+    parser.add_argument("--agent", type=str, default="navi")
+    parser.add_argument("--prompt", type=str, default=None)
     parser.add_argument("--som_origin", type=str, default="oss") # options: 'oss', 'a11y', 'mixed-oss'
     parser.add_argument("--max_trajectory_length", type=int, default=3)
     parser.add_argument("--test_config_base_dir", type=str, default="evaluation_examples_windows")
@@ -120,9 +134,13 @@ def config() -> argparse.Namespace:
     # multi-worker related
     parser.add_argument("--worker_id", type=int, default=0, help="ID of the worker")  
     parser.add_argument("--num_workers", type=int,  default=1, help="Total number of workers") 
+    parser.add_argument("--is_azure", type=str_to_bool, default=False, help="Is the run on Azure?")
 
     # benchmark difficulty level
     parser.add_argument("--diff_lvl", type=str, default="normal", help="Difficulty level of the benchmark")  
+
+    # check VM setup state
+    parser.add_argument("--check_setup", type=str_to_bool, default=False, help="Check if the VM setup state is correct")
 
     args, unknownargs = parser.parse_known_args()
 
@@ -149,7 +167,8 @@ def test(
         "max_steps": args.max_steps,
         "a11y_backend": args.a11y_backend,
         "max_trajectory_length": args.max_trajectory_length,
-        "agent_name": args.agent_name,
+        "agent": args.agent,
+        "prompt": args.prompt,
         "som_origin": args.som_origin,
         "model": args.model,
         "temperature": args.temperature,
@@ -160,9 +179,10 @@ def test(
         "trial_id": args.trial_id,
         "worker_id": args.worker_id,
         "num_workers": args.num_workers,
+        "is_azure": args.is_azure,
     }
 
-    if cfg_args["agent_name"] == "navi":
+    if cfg_args["agent"] == "navi":
         if cfg_args["som_origin"] in ["a11y", "omni", "mixed-omni"]:
             som_config = None
         elif cfg_args["som_origin"] in ["oss", "mixed-oss"]:
@@ -178,7 +198,6 @@ def test(
                     "cdp_url": f"http://{args.emulator_ip}:9222"
                 }
             }
-        
         agent = NaviAgent(
             server="oai",
             model=args.model,
@@ -186,19 +205,28 @@ def test(
             som_origin=args.som_origin,
             temperature=args.temperature
         )
-    elif cfg_args["agent_name"] == "claude":
-        from mm_agents.claude.agent import ClaudeAgent
-        agent = ClaudeAgent()
+        not_navi = False
+    elif cfg_args["agent"] == "pcagent":
+        if cfg_args["prompt"] is None:
+            agent = PCAgent(cfg_args["model"])
+        else:
+            agent = PCAgent(cfg_args["model"], prompt=cfg_args["prompt"])
+        not_navi = True
+    elif cfg_args["agent"] == "uitars":
+        agent = UITARSAgent(cfg_args["model"])
+        not_navi = True
     else:
-        raise ValueError(f"Unknown agent name: {cfg_args['agent_name']}")
+        raise ValueError(f"Unknown agent name: {cfg_args['agent']}")
     
     env = DesktopEnv(
-        action_space=agent.action_space,
+        action_space="pyautogui",
         screen_size=(args.screen_width, args.screen_height),
         headless=args.headless,
         require_a11y_tree=args.observation_type in ["a11y_tree", "screenshot_a11y_tree", "som"],
         emulator_ip=args.emulator_ip, #for OS running on docker
-        a11y_backend=args.a11y_backend
+        a11y_backend=args.a11y_backend,
+        not_navi=not_navi,
+        is_azure=args.is_azure
     )
 
     for domain in tqdm(test_all_meta, desc="Domain"):
@@ -232,15 +260,22 @@ def test(
             cfg_args["start_time"] = datetime.datetime.now().strftime("%Y:%m:%d-%H:%M:%S")
             # run.config.update(cfg_args)
 
-            example_result_dir = os.path.join(
-                args.result_dir,
-                args.action_space,
-                args.observation_type,
-                args.model,
-                args.trial_id,
-                domain,
-                example_id
-            )
+            if args.agent == "navi":
+               example_result_dir = os.path.join(
+                    args.result_dir,
+                    args.trial_id,
+                    args.agent + '-' + args.model,
+                    domain,
+                    example_id
+                )
+            else:
+                example_result_dir = os.path.join(
+                    args.result_dir,
+                    args.trial_id,
+                    args.agent,
+                    domain,
+                    example_id
+                )
             os.makedirs(example_result_dir, exist_ok=True)
             
             # Example Logging Config {{{
@@ -253,7 +288,7 @@ def test(
             
             # example start running
             try:
-                lib_run_single.run_single_example(agent, env, example, max_steps, instruction, args, example_result_dir,
+                lib_run_single.run_single_example(agent, env, example, max_steps, domain, example_id, instruction, args, example_result_dir,
                                                   scores)
             except Exception as e:
                 logger.error(f"Exception in {domain}/{example_id}: {e}")
@@ -269,13 +304,12 @@ def test(
                     }))
                     f.write("\n")
                 
-                # Write error details with stack trace to traj.html
-                with open(os.path.join(example_result_dir, "traj.html"), "a") as f:
-                    f.write(f"<h1>Error: Exception in {domain}/{example_id}</h1>")
-                    f.write(f"<p>{e}</p>")
-                    f.write("<pre>")
+                # Write error details with stack trace to error.txt
+                with open(os.path.join(example_result_dir, "error.txt"), "a") as f:
+                    f.write(f"Error: Exception in {domain}/{example_id}\n")
+                    f.write(f"{e}\n")
                     f.write(error_traceback)
-                    f.write("</pre>")
+                    f.write("\n")
             else:
                 logger.info(f"Finished {domain}/{example_id}")
             finally:
@@ -284,14 +318,7 @@ def test(
                 task_log_handler.close()
 
     env.close()
-    # logger.info(f"UPDATED SCORES: {scores}")
         
-    if len(scores) == 0:
-        logger.info("No examples finished.")
-    else:
-        logger.info(f"Average score: {sum(scores) / len(scores)}")
-
-
 def get_unfinished(action_space, use_model, observation_type, result_dir, trial_id, total_file_json):
     target_dir = os.path.join(result_dir, action_space, observation_type, use_model, trial_id)
 
@@ -328,9 +355,12 @@ def get_unfinished(action_space, use_model, observation_type, result_dir, trial_
 
     return total_file_json
 
-
+"""
+Get the result of the current experiment
+"""
 def get_result(action_space, use_model, observation_type, result_dir, trial_id, total_file_json):
     target_dir = os.path.join(result_dir, action_space, observation_type, use_model, trial_id)
+    print("a Dir:", target_dir)
     if not os.path.exists(target_dir):
         print("New experiment, no result yet.")
         return None
@@ -415,8 +445,8 @@ if __name__ == '__main__':
         left_info += f"{domain}: {len(test_file_list[domain])}\n"
     logger.info(f"Left tasks:\n{left_info}")
 
-    # distribute tasks among workers
-        # Flatten your dict into a list of tasks  
+    # Distribute tasks among workers
+    # Flatten your dict into a list of tasks  
     all_tasks_test  = [(domain, example_id) for domain in test_file_list for example_id in test_file_list[domain]]  
 
     # Calculate the start and end indices of the tasks for this worker    
@@ -432,7 +462,7 @@ if __name__ == '__main__':
     # Slice the tasks for this worker  
     tasks_for_this_worker = all_tasks_test[start_index:end_index]
 
-    # log which tasks this worker is doing
+    # Log which tasks this worker is doing
     logger.info(f"Worker {args.worker_id} is doing tasks: {tasks_for_this_worker}")
   
     # Convert the list of tasks back to a dictionary  
@@ -443,11 +473,4 @@ if __name__ == '__main__':
             test_file_list_worker[domain] = []  
         test_file_list_worker[domain].append(example_id)  
 
-    get_result(args.action_space,
-        args.model,
-        args.observation_type,
-        args.result_dir,
-        args.trial_id,
-        test_file_list_worker
-    )
     test(args, test_file_list_worker)
