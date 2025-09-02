@@ -42,7 +42,7 @@ failed_containers=()
 # remove container
 for id in $(seq 1 $CONCURRENT_NUM)
 do 
-    container_name="winarena_${id}"
+    container_name="winarena-v2_${id}"
     echo "Removing container: $container_name"
     
     # Check if container exists first

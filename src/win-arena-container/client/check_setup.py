@@ -19,19 +19,12 @@ vscode_standard = "/client/desktop_env/setup_refer_images/vscode_standard.png"
 
 skip_domain_list = ["file_explorer", "settings", "microsoft_paint", "notepad", "claude"]
 
-def _load_config():
-    config_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..", "config.json"))
-    with open(config_path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-_cfg = _load_config()
-
-_api_key = _cfg.get("OPENAI_API_KEY_FOR_CHECK_SETUP")
-_base_url = _cfg.get("OPENAI_BASE_URL_FOR_CHECK_SETUP")
+_api_key = os.environ.get("OPENAI_API_KEY_FOR_CHECK_SETUP")
+_base_url = os.environ.get("OPENAI_BASE_URL_FOR_CHECK_SETUP")
 
 if not _api_key or not _base_url:
     raise RuntimeError(
-        "Missing OPENAI_API_KEY_FOR_CHECK_SETUP or OPENAI_BASE_URL_FOR_CHECK_SETUP in config.json"
+        "Missing OPENAI_API_KEY_FOR_CHECK_SETUP or OPENAI_BASE_URL_FOR_CHECK_SETUP environment variables"
     )
 
 client = OpenAI(api_key=_api_key, base_url=_base_url)

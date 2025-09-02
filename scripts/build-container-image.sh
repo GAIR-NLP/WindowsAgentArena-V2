@@ -46,9 +46,9 @@ else
 fi
 
 if [ "$mode" = "dev" ]; then # Only for dev mode
-  winarena_image_name="winarena-$mode"
+  winarena_image_name="winarena-v2-$mode"
 else
-  winarena_image_name="winarena"
+  winarena_image_name="winarena-v2"
 fi
 
 docker build --build-arg DEPLOY_MODE=$mode -f $SCRIPT_DIR/../src/win-arena-container/Dockerfile-WinArena -t $winarena_image_name:latest $SCRIPT_DIR/../

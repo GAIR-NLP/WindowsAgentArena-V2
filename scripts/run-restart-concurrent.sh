@@ -103,7 +103,7 @@ run_instance() {
     echo "Instance $concurrent_idx has completed its tasks for run $run_count." >> "$log_file"
     remove_vm_snapshot "$concurrent_idx" "$log_file"
 
-    docker kill winarena_${concurrent_idx} >> "$log_file" 2>&1
+    docker kill winarena-v2_${concurrent_idx} >> "$log_file" 2>&1
     
     echo "=== Instance $concurrent_idx Run $run_count Log Completed at $(date) ===" >> "$log_file"
 }
@@ -178,7 +178,7 @@ for run_count in {1..3}; do
     done
 
     # Display command to terminate all instances at once
-    echo "To kill all instances at once, run: sudo ./kill_container.sh ${instance_pids[*]}" | tee -a "$main_log"
+    echo "To kill all instances at once, cd to scripts directory and run: sudo ./kill_container.sh ${instance_pids[*]}" | tee -a "$main_log"
     echo "Note: You may need to quit the main process or exit screen (screen -S winarena -X quit) before killing containers." | tee -a "$main_log"
 
     # Wait for all background processes to complete

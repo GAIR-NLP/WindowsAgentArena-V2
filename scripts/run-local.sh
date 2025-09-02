@@ -17,7 +17,7 @@ cpu_cores=8
 mount_vm_storage=true
 mount_client=true
 mount_server=true
-container_name="winarena"
+container_name="winarena-v2"
 browser_port=8006
 rdp_port=3390
 start_client=true
@@ -183,9 +183,11 @@ echo "Using mode: $mode"
 
 OPENAI_API_KEY=$(extract_json_field_from_file "OPENAI_API_KEY" "$config_file_path")
 OPENAI_BASE_URL=$(extract_json_field_from_file "OPENAI_BASE_URL" "$config_file_path")
+OPENAI_API_KEY_FOR_CHECK_SETUP=$(extract_json_field_from_file "OPENAI_API_KEY_FOR_CHECK_SETUP" "$config_file_path")
+OPENAI_BASE_URL_FOR_CHECK_SETUP=$(extract_json_field_from_file "OPENAI_BASE_URL_FOR_CHECK_SETUP" "$config_file_path")
 
 if [[ -z "$OPENAI_API_KEY" ]]; then
     log_error_exit "OPENAI_API_KEY must be set!"
 fi
 
-sudo bash ./run.sh --mode $mode --prepare-image $prepare_image --container-name $container_name --skip-build $skip_build --interactive $interactive --connect $connect --use-kvm $use_kvm --ram-size $ram_size --cpu-cores $cpu_cores --mount-vm-storage $mount_vm_storage --mount-client $mount_client --mount-server $mount_server --browser-port $browser_port --rdp-port $rdp_port --start-client $start_client --agent $agent --trial-id $trial_id --model $model --max-steps $max_steps --som-origin $som_origin --a11y-backend $a11y_backend --gpu-enabled $gpu_enabled --openai-api-key $OPENAI_API_KEY --openai-base-url $OPENAI_BASE_URL --azure-api-key $AZURE_API_KEY --azure-endpoint $AZURE_ENDPOINT --concurrent $concurrent --concurrent-idx $concurrent_idx --check-setup $check_setup
+sudo bash ./run.sh --mode $mode --prepare-image $prepare_image --container-name $container_name --skip-build $skip_build --interactive $interactive --connect $connect --use-kvm $use_kvm --ram-size $ram_size --cpu-cores $cpu_cores --mount-vm-storage $mount_vm_storage --mount-client $mount_client --mount-server $mount_server --browser-port $browser_port --rdp-port $rdp_port --start-client $start_client --agent $agent --trial-id $trial_id --model $model --max-steps $max_steps --som-origin $som_origin --a11y-backend $a11y_backend --gpu-enabled $gpu_enabled --openai-api-key $OPENAI_API_KEY --openai-base-url $OPENAI_BASE_URL --openai-api-key-for-check-setup $OPENAI_API_KEY_FOR_CHECK_SETUP --openai-base-url-for-check-setup $OPENAI_BASE_URL_FOR_CHECK_SETUP --azure-api-key $AZURE_API_KEY --azure-endpoint $AZURE_ENDPOINT --concurrent $concurrent --concurrent-idx $concurrent_idx --check-setup $check_setup

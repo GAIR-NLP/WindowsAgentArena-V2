@@ -17,7 +17,7 @@ cpu_cores=8
 mount_vm_storage=true
 mount_client=true
 mount_server=true
-container_name="winarena"
+container_name="winarena-v2"
 browser_port=8006
 rdp_port=3390
 start_client=true
@@ -129,6 +129,14 @@ while [[ $# -gt 0 ]]; do
             OPENAI_BASE_URL="$2"
             shift 2
             ;;
+        --openai-api-key-for-check-setup)
+            OPENAI_API_KEY_FOR_CHECK_SETUP="$2"
+            shift 2
+            ;;
+        --openai-base-url-for-check-setup)
+            OPENAI_BASE_URL_FOR_CHECK_SETUP="$2"
+            shift 2
+            ;;
         --azure-api-key)
             AZURE_API_KEY="$2"
             shift 2
@@ -156,7 +164,7 @@ while [[ $# -gt 0 ]]; do
         --help)
             echo "Usage: $0 [options]"
             echo "Options:"
-            echo "  --container-name <name> : Name of the arena container (default: winarena)"
+            echo "  --container-name <name> : Name of the arena container (default: winarena-v2)"
             echo "  --prepare-image <true/false> : Prepare an arena golden image (default: false)"
             echo "  --skip-build <true/false> : Skip building the arena container image (default: false)"
             echo "  --interactive <true/false> : Launches the arena container in interactive mode, providing access to the command line (bin/bash) without initiating the client or VM server processes. (default: false)"
@@ -195,9 +203,9 @@ done
 
 # Static parameters
 if [ "$mode" = "dev" ]; then # Only for dev mode
-  winarena_image_name="winarena-$mode"
+  winarena_image_name="winarena-v2-$mode"
 else
-  winarena_image_name="winarena"
+  winarena_image_name="winarena-v2"
 fi
 
 winarena_image_tag="latest" 
@@ -256,7 +264,7 @@ if [ "$concurrent" = true ]; then
    browser_port=$(find_available_port $start_browser_port)
    rdp_port=$(find_available_port $start_rdp_port)
    
-   container_name="winarena_${concurrent_idx}"
+   container_name="winarena-v2_${concurrent_idx}"
    vm_storage_mount_path="$SCRIPT_DIR/../src/win-arena-container/vm/storage_${concurrent_idx}"
    test_custom_path="$client_mount_path/evaluation_examples_windows/concurrent_eval/test_custom_${concurrent_idx}.json"
    
@@ -385,6 +393,14 @@ invoke_docker_container() {
         if [ -n "$AZURE_ENDPOINT" ]; then
             docker_command+=" -e AZURE_ENDPOINT=$AZURE_ENDPOINT"
         fi
+    fi
+    
+    # OpenAI API Key for Check Setup
+    if [ -n "$OPENAI_API_KEY_FOR_CHECK_SETUP" ]; then
+        docker_command+=" -e OPENAI_API_KEY_FOR_CHECK_SETUP=$OPENAI_API_KEY_FOR_CHECK_SETUP"
+    fi
+    if [ -n "$OPENAI_BASE_URL_FOR_CHECK_SETUP" ]; then
+        docker_command+=" -e OPENAI_BASE_URL_FOR_CHECK_SETUP=$OPENAI_BASE_URL_FOR_CHECK_SETUP"
     fi
 
     # Add the image name with tag
