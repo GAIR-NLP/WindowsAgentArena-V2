@@ -1,10 +1,10 @@
 {
     "OPENAI_API_KEY": "EMPTY",
-    "OPENAI_BASE_URL": "http://localhost:8030/v1",
+    "OPENAI_BASE_URL": "http://host.docker.internal:8030/v1",
     "OPENAI_API_KEY_FOR_CHECK_SETUP": "sk-1234567890",
     "OPENAI_BASE_URL_FOR_CHECK_SETUP": "https://api.openai.com/v1",
     "model": "henryhe0123/PC-Agent-E",
-    "trial_id": 9,
+    "trial_id": 1,
     "max_steps": 30,
     "agent": "pcagent",
     "CONCURRENT_NUM": 4
