@@ -16,7 +16,7 @@ revert_vm_snapshot() {
     if [ ! -d "$vm_storage_mount_path" ]; then
         mkdir -p "$vm_storage_mount_path"
     fi
-    
+
     # Clear storage directory, which contains the modified Windows system checkpoint from the last run
     start_time=$(date +%s)
     echo "Reverting $vm_storage_mount_path..." >> "$log_file"
@@ -44,7 +44,7 @@ remove_vm_snapshot(){
     local concurrent_idx=$1
     local log_file=$2
     vm_storage_mount_path="../src/win-arena-container/vm/storage_${concurrent_idx}"
-   
+
     # Remove storage directory
     start_time=$(date +%s)
     echo "Removing $vm_storage_mount_path..." >> "$log_file"
@@ -54,7 +54,7 @@ remove_vm_snapshot(){
     else
         clear_time=$(date +%s)
     fi
-    
+
     echo "Remove completed in $((clear_time - start_time)) seconds" >> "$log_file"
 }
 
@@ -67,13 +67,13 @@ run_instance() {
     local max_steps=$5
     local check_setup=$6
     local run_count=$7
-    
+
     # Create dedicated log directory for current trial_id and instance
     local instance_log_dir="$LOG_BASE_DIR/trial_${trial_id}/instance_${concurrent_idx}"
     if [ ! -d "$instance_log_dir" ]; then
         mkdir -p "$instance_log_dir"
     fi
-    
+
     local log_file="$instance_log_dir/run${run_count}.log"
 
     # Initialize log file
@@ -92,19 +92,19 @@ run_instance() {
 
         # Revert VM snapshot
         revert_vm_snapshot "$concurrent_idx" "$log_file"
-    
+
         ./run-local.sh --agent "$agent" --model "$model" --trial-id "$trial_id" --skip-build true --max-steps $max_steps --concurrent true --concurrent-idx $concurrent_idx --check-setup $check_setup >> "$log_file" 2>&1
-    
+
     done
 
     test_current_path="../src/win-arena-container/client/evaluation_examples_windows/concurrent_eval/test_current_${concurrent_idx}.json"
     rm "$test_current_path"
-    
+
     echo "Instance $concurrent_idx has completed its tasks for run $run_count." >> "$log_file"
     remove_vm_snapshot "$concurrent_idx" "$log_file"
 
     docker kill winarena-v2_${concurrent_idx} >> "$log_file" 2>&1
-    
+
     echo "=== Instance $concurrent_idx Run $run_count Log Completed at $(date) ===" >> "$log_file"
 }
 
@@ -121,72 +121,91 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 model=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("model",""))' "$CONFIG_FILE")
-trial_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("trial_id",""))' "$CONFIG_FILE")
+initial_trial_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("trial_id",""))' "$CONFIG_FILE")
 max_steps=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("max_steps",""))' "$CONFIG_FILE")
 agent=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("agent",""))' "$CONFIG_FILE")
 CONCURRENT_NUM=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("CONCURRENT_NUM",""))' "$CONFIG_FILE")
 
-if [ -z "$model" ] || [ -z "$trial_id" ] || [ -z "$max_steps" ] || [ -z "$agent" ] || [ -z "$CONCURRENT_NUM" ]; then
+if [ -z "$model" ] || [ -z "$initial_trial_id" ] || [ -z "$max_steps" ] || [ -z "$agent" ] || [ -z "$CONCURRENT_NUM" ]; then
     echo "Missing required config fields in $CONFIG_FILE: model, trial_id, max_steps, agent, CONCURRENT_NUM"
     exit 1
 fi
 
+# Calculate end trial ID
+end_trial_id=$((initial_trial_id + 9))
 
-# Create dedicated log directory for current trial_id
-LOG_DIR="$LOG_BASE_DIR/trial_${trial_id}"
-if [ ! -d "$LOG_DIR" ]; then
-    mkdir -p "$LOG_DIR"
-fi
+echo "Starting multi-trial experiment from trial $initial_trial_id to trial $end_trial_id"
 
-# Create and initialize main log file
-main_log="$LOG_DIR/main.log"
-echo "=== Main Process Started at $(date) ===" > "$main_log"
+# Main trial loop
+for ((current_trial_id=initial_trial_id; current_trial_id<end_trial_id; current_trial_id++)); do
+    echo "=========================================="
+    echo "Starting Trial $current_trial_id (of $end_trial_id)"
+    echo "=========================================="
 
-# Run 3 times of task distribution and execution
-for run_count in {1..3}; do
-    echo "=== Starting run $run_count of 3 ==="
-    
-    # Set check_setup parameter: need to check environment setup correctness in first and second runs, no need in third run
-    if [ $run_count -eq 3 ]; then
-        check_setup_flag="false"
-    else
-        # check_setup_flag="true"
-        check_setup_flag="false"
-    fi
-    
-    # Distribute tasks from test_custom to each instance
-    echo "Distributing tasks to $CONCURRENT_NUM instances (run $run_count)..."
-    python_output=$(python3 "./distribute_tasks.py" --concurrent_num $CONCURRENT_NUM --trial_id $trial_id --agent $agent)
-    if [ "$python_output" -eq 1 ]; then
-        echo "All tasks are completed! No need to run again."
-        exit 0
+    # Create dedicated log directory for current trial_id
+    LOG_DIR="$LOG_BASE_DIR/trial_${current_trial_id}"
+    if [ ! -d "$LOG_DIR" ]; then
+        mkdir -p "$LOG_DIR"
     fi
 
-    # Write current run start information
-    echo "== Run $run_count Started with $CONCURRENT_NUM concurrent instances at $(date) ==" >> "$main_log"
-    echo "== Run $run_count Started with $CONCURRENT_NUM concurrent instances at $(date) =="
-    
-    # Collect PIDs of all instances
-    instance_pids=()
-    
-    for ((i=1; i<=CONCURRENT_NUM; i++)); do
-        run_instance "$i" "$model" "$trial_id" "$agent" "$max_steps" "$check_setup_flag" "$run_count"&
-        pid=$!
-        instance_pids+=($pid)
-        echo "Started instance $i with PID $pid (run $run_count)" | tee -a "$main_log"
-        # Add small delay to prevent resource contention
-        sleep 5
+    # Create and initialize main log file
+    main_log="$LOG_DIR/main.log"
+    echo "=== Trial $current_trial_id Main Process Started at $(date) ===" > "$main_log"
+    echo "=== Trial $current_trial_id: $model, $agent, max_steps=$max_steps ===" >> "$main_log"
+
+    # Run 3 times of task distribution and execution for current trial
+    for run_count in {1..3}; do
+        echo "=== Starting Trial $current_trial_id - Run $run_count of 3 ==="
+
+        # Set check_setup parameter: need to check environment setup correctness in first and second runs, no need in third run
+        if [ $run_count -eq 3 ]; then
+            check_setup_flag="false"
+        else
+            # check_setup_flag="true"
+            check_setup_flag="false"
+        fi
+
+        # Distribute tasks from test_custom to each instance
+        echo "Distributing tasks to $CONCURRENT_NUM instances (Trial $current_trial_id, run $run_count)..."
+        python_output=$(python3 "./distribute_tasks.py" --concurrent_num $CONCURRENT_NUM --trial_id $current_trial_id --agent $agent)
+        if [ "$python_output" -eq 1 ]; then
+            echo "All tasks are completed for Trial $current_trial_id! Skipping to next trial."
+            break 2  # Break out of both inner and outer loops
+        fi
+
+        # Write current run start information
+        echo "== Trial $current_trial_id - Run $run_count Started with $CONCURRENT_NUM concurrent instances at $(date) ==" >> "$main_log"
+        echo "== Trial $current_trial_id - Run $run_count Started with $CONCURRENT_NUM concurrent instances at $(date) =="
+
+        # Collect PIDs of all instances
+        instance_pids=()
+
+        for ((i=1; i<=CONCURRENT_NUM; i++)); do
+            run_instance "$i" "$model" "$current_trial_id" "$agent" "$max_steps" "$check_setup_flag" "$run_count"&
+            pid=$!
+            instance_pids+=($pid)
+            echo "Started instance $i with PID $pid (Trial $current_trial_id, run $run_count)" | tee -a "$main_log"
+            # Add small delay to prevent resource contention
+            sleep 5
+        done
+
+        # Display command to terminate all instances at once
+        echo "To kill all instances at once, cd to scripts directory and run: sudo ./kill_container.sh ${instance_pids[*]}" | tee -a "$main_log"
+        echo "Note: You may need to quit the main process or exit screen (screen -S winarena -X quit) before killing containers." | tee -a "$main_log"
+
+        # Wait for all background processes to complete
+        wait
+        echo "== Trial $current_trial_id - Run $run_count Completed at $(date) ==" >> "$main_log"
+        echo "== Trial $current_trial_id - Run $run_count Completed at $(date) =="
+        echo ""
     done
 
-    # Display command to terminate all instances at once
-    echo "To kill all instances at once, cd to scripts directory and run: sudo ./kill_container.sh ${instance_pids[*]}" | tee -a "$main_log"
-    echo "Note: You may need to quit the main process or exit screen (screen -S winarena -X quit) before killing containers." | tee -a "$main_log"
-
-    # Wait for all background processes to complete
-    wait
-    echo "== Run $run_count Completed at $(date) ==" >> "$main_log"
-    echo "== Run $run_count Completed at $(date) =="
+    echo "=== Trial $current_trial_id completed successfully! ===" >> "$main_log"
+    echo "Trial $current_trial_id completed successfully!"
     echo ""
+
+    # Add a small delay between trials to allow system cleanup
+    sleep 10
 done
 
-echo "All 3 runs completed successfully!"
+echo "All trials from $initial_trial_id to $end_trial_id completed successfully!"

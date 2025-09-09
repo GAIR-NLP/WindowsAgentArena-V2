@@ -374,8 +374,8 @@ invoke_docker_container() {
 
     # Assign CPU core
     if [ "$concurrent" = true ]; then
-        start_cpu=$((concurrent_idx*16+1))
-        end_cpu=$((concurrent_idx*16+16))
+        start_cpu=$((concurrent_idx*${cpu_cores}))
+        end_cpu=$((concurrent_idx*${cpu_cores}+${cpu_cores}-1))
         docker_command+=" --cpuset-cpus=${start_cpu}-${end_cpu}"
     fi
 
