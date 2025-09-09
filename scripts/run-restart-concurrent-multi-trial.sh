@@ -161,8 +161,7 @@ for ((current_trial_id=initial_trial_id; current_trial_id<end_trial_id; current_
         if [ $run_count -eq 3 ]; then
             check_setup_flag="false"
         else
-            # check_setup_flag="true"
-            check_setup_flag="false"
+            check_setup_flag="true"
         fi
 
         # Distribute tasks from test_custom to each instance

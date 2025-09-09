@@ -150,8 +150,7 @@ for run_count in {1..3}; do
     if [ $run_count -eq 3 ]; then
         check_setup_flag="false"
     else
-        # check_setup_flag="true"
-        check_setup_flag="false"
+        check_setup_flag="true"
     fi
     
     # Distribute tasks from test_custom to each instance
