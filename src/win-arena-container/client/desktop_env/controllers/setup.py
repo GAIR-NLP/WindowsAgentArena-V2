@@ -6,7 +6,6 @@ import shutil
 import sqlite3
 import tempfile
 import time
-import traceback
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Union, Optional
@@ -19,7 +18,6 @@ from pydrive.drive import GoogleDrive, GoogleDriveFile, GoogleDriveFileList
 from requests_toolbelt.multipart.encoder import MultipartEncoder
 
 from desktop_env.controllers.python import PythonController
-from desktop_env.evaluators.metrics.utils import compare_urls
 
 logger = logging.getLogger("desktopenv.setup")
 
@@ -27,6 +25,22 @@ FILE_PATH = os.path.dirname(os.path.abspath(__file__))
 
 
 class SetupController:
+    @staticmethod
+    def _check_response(response):
+        """Reject reported setup failures; HTTP success does not imply app readiness."""
+        if response.status_code != 200:
+            raise requests.HTTPError(
+                f"Setup request failed (HTTP {response.status_code}): {response.text}",
+                response=response,
+            )
+        try:
+            body = response.json()
+        except ValueError:
+            return None  # Some setup endpoints return plain text on success.
+        if isinstance(body, dict) and body.get("status") == "error":
+            raise RuntimeError(f"Setup request failed: {response.text}")
+        return body
+
     def __init__(self, vm_ip: str, cache_dir: str):
         self.vm_ip: str = vm_ip
         self.http_server: str = f"http://{vm_ip}:5000"
@@ -111,7 +125,7 @@ class SetupController:
             if not os.path.exists(cache_path):
                 max_retries = 3
                 downloaded = False
-                e = None
+                last_error = None
                 for i in range(max_retries):
                     try:
                         response = requests.get(url, stream=True)
@@ -126,10 +140,11 @@ class SetupController:
                         break
 
                     except requests.RequestException as e:
+                        last_error = e
                         logger.error(
                             f"Failed to download {url} caused by {e}. Retrying... ({max_retries - i - 1} attempts left)")
                 if not downloaded:
-                    raise requests.RequestException(f"Failed to download {url}. No retries left. Error: {e}")
+                    raise requests.RequestException(f"Failed to download {url}. No retries left. Error: {last_error}") from last_error
 
             form = MultipartEncoder({
                 "file_path": path,
@@ -142,12 +157,11 @@ class SetupController:
             try:
                 logger.debug("REQUEST ADDRESS: %s", self.http_server + "/setup" + "/upload")
                 response = requests.post(self.http_server + "/setup" + "/upload", headers=headers, data=form)
-                if response.status_code == 200:
-                    logger.info("Command executed successfully: %s", response.text)
-                else:
-                    logger.error("Failed to upload file. Status code: %s", response.text)
+                self._check_response(response)
+                logger.info("Command executed successfully: %s", response.text)
             except requests.exceptions.RequestException as e:
                 logger.error("An error occurred while trying to send the request: %s", e)
+                raise
 
     def _upload_file_setup(self, files: List[Dict[str, str]]):
         """
@@ -163,8 +177,7 @@ class SetupController:
             path: str = f["path"]
 
             if not os.path.exists(local_path):
-                logger.error(f"Setup Upload - Invalid local path ({local_path}).")
-                return
+                raise FileNotFoundError(f"Setup Upload - Invalid local path ({local_path}).")
 
             form = MultipartEncoder({
                 "file_path": path,
@@ -177,12 +190,11 @@ class SetupController:
             try:
                 logger.debug("REQUEST ADDRESS: %s", self.http_server + "/setup" + "/upload")
                 response = requests.post(self.http_server + "/setup" + "/upload", headers=headers, data=form)
-                if response.status_code == 200:
-                    logger.info("Command executed successfully: %s", response.text)
-                else:
-                    logger.error("Failed to upload file. Status code: %s", response.text)
+                self._check_response(response)
+                logger.info("Command executed successfully: %s", response.text)
             except requests.exceptions.RequestException as e:
                 logger.error("An error occurred while trying to send the request: %s", e)
+                raise
 
     def _change_wallpaper_setup(self, path: str):
         # if not config:
@@ -202,12 +214,11 @@ class SetupController:
         # send request to server to change wallpaper
         try:
             response = requests.post(self.http_server + "/setup" + "/change_wallpaper", headers=headers, data=payload)
-            if response.status_code == 200:
-                logger.info("Command executed successfully: %s", response.text)
-            else:
-                logger.error("Failed to change wallpaper. Status code: %s", response.text)
+            self._check_response(response)
+            logger.info("Command executed successfully: %s", response.text)
         except requests.exceptions.RequestException as e:
             logger.error("An error occurred while trying to send the request: %s", e)
+            raise
 
     def _tidy_desktop_setup(self, **config):
         raise NotImplementedError()
@@ -229,13 +240,12 @@ class SetupController:
         # send request to server to open file
         try:
             response = requests.post(self.http_server + "/setup" + "/open_file", headers=headers, data=payload)
-            if response.status_code == 200:
-                logger.info("Command executed successfully: %s", response.text)
-                time.sleep(2)
-            else:
-                logger.error("Failed to open file. Status code: %s", response.text)
+            self._check_response(response)
+            logger.info("Command executed successfully: %s", response.text)
+            time.sleep(2)
         except requests.exceptions.RequestException as e:
             logger.error("An error occurred while trying to send the request: %s", e)
+            raise
 
     def _launch_setup(self, command: Union[str, List[str]], shell: bool = False):
         if not command:
@@ -250,14 +260,13 @@ class SetupController:
 
         try:
             response = requests.post(self.http_server + "/setup" + "/launch", headers=headers, data=payload)
+            self._check_response(response)
             logger.info(f"launch_setup(), response: {payload}")
             logger.info(f"launch_setup(), response: {response}")
-            if response.status_code == 200:
-                logger.info("Command executed successfully: %s", response.text)
-            else:
-                logger.error("Failed to launch application. Status code: %s", response.text)
+            logger.info("Command executed successfully: %s", response.text)
         except requests.exceptions.RequestException as e:
             logger.error("An error occurred while trying to send the request: %s", e)
+            raise
 
     def _execute_setup(
             self,
@@ -271,47 +280,42 @@ class SetupController:
             raise Exception("Empty command to launch.")
 
         until: Dict[str, Any] = until or {}
-        terminates: bool = False
         nb_failings = 0
 
         payload = json.dumps({"command": command, "shell": shell})
         headers = {"Content-Type": "application/json"}
 
-        while not terminates:
+        while True:
             try:
                 response = requests.post(self.http_server + "/setup" + "/execute", headers=headers, data=payload)
-                if response.status_code == 200:
-                    results: Dict[str, str] = response.json()
-                    if stdout:
-                        with open(os.path.join(self.cache_dir, stdout), "w") as f:
-                            f.write(results["output"])
-                    if stderr:
-                        with open(os.path.join(self.cache_dir, stderr), "w") as f:
-                            f.write(results["error"])
-                    logger.info("Command executed successfully: %s -> %s"
-                                , " ".join(command) if isinstance(command, list) else command
-                                , response.text
-                                )
-                else:
-                    logger.error("Failed to launch application. Status code: %s", response.text)
-                    results = None
-                    nb_failings += 1
+                results = self._check_response(response)
             except requests.exceptions.RequestException as e:
                 logger.error("An error occurred while trying to send the request: %s", e)
-                traceback.print_exc()
-
-                results = None
                 nb_failings += 1
-
-            if len(until) == 0:
-                terminates = True
-            elif results is not None:
-                terminates = "returncode" in until and results["returncode"] == until["returncode"] \
-                             or "stdout" in until and until["stdout"] in results["output"] \
-                             or "stderr" in until and until["stderr"] in results["error"]
-            terminates = terminates or nb_failings >= 5
-            if not terminates:
+                if not until or nb_failings >= 5:
+                    raise
                 time.sleep(0.3)
+                continue
+
+            if not isinstance(results, dict) or type(results.get("returncode")) is not int:
+                raise RuntimeError("Setup execute response has no integer returncode")
+            if stdout:
+                with open(os.path.join(self.cache_dir, stdout), "w") as f:
+                    f.write(results["output"])
+            if stderr:
+                with open(os.path.join(self.cache_dir, stderr), "w") as f:
+                    f.write(results["error"])
+            if not until:
+                if results["returncode"] != 0:
+                    raise RuntimeError(f"Setup command failed: {response.text}")
+                break
+            # A nonzero return code can be the requested completion condition.
+            if ("returncode" in until and results["returncode"] == until["returncode"]
+                    or "stdout" in until and until["stdout"] in results["output"]
+                    or "stderr" in until and until["stderr"] in results["error"]):
+                break
+            time.sleep(0.3)
+        logger.info("Command completed: %s -> %s", command, response.text)
 
     def _command_setup(self, command: List[str], **kwargs):
         self._execute_setup(command, **kwargs)
@@ -341,16 +345,33 @@ class SetupController:
             'Content-Type': 'application/json'
         }
 
-        # send request to server to open file
+        # Only this exact handler response proves that no activation occurred.
+        missing = f"Window {window_name} not found (empty results)"
+        deadline = time.monotonic() + 30.0
         try:
-            response = requests.post(self.http_server + "/setup" + "/activate_window", headers=headers, data=payload)
-            logger.info(f"activate window setup RESPONSE: {response}, {response.text}")
-            if response.status_code == 200:
-                logger.info("Command executed successfully: %s", response.text)
-            else:
-                logger.info(f"Failed to activate window {window_name}. Status code: {response.text}")
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError(f"Window readiness deadline exceeded: {window_name}")
+                response = requests.post(
+                    self.http_server + "/setup/activate_window", headers=headers, data=payload,
+                    timeout=min(5.0, remaining),
+                )
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError(
+                        f"Window readiness deadline exceeded: {window_name}; "
+                        f"last HTTP {response.status_code}: {response.text}"
+                    )
+                if response.status_code == 404 and response.text == missing:
+                    time.sleep(min(0.5, remaining))
+                    continue
+                self._check_response(response)
+                logger.info("Window activation response: %s", response.text)
+                break
         except requests.exceptions.RequestException as e:
             logger.error("An error occurred while trying to send the request: %s", e)
+            raise
 
     def _close_all_setup(self):
         payload = json.dumps({})
@@ -361,12 +382,11 @@ class SetupController:
         # send request to server to open file
         try:
             response = requests.post(self.http_server + "/setup" + "/close_all", headers=headers, data=payload)
-            if response.status_code == 200:
-                logger.info("Command executed successfully: %s", response.text)
-            else:
-                logger.error(f"Failed to close all windows. Status code: %s", response.text)
+            self._check_response(response)
+            logger.info("Command executed successfully: %s", response.text)
         except requests.exceptions.RequestException as e:
             logger.error("An error occurred while trying to send the request: %s", e)
+            raise
 
     def _clean_up_files(self):
         payload = json.dumps({})
@@ -377,12 +397,11 @@ class SetupController:
         # send request to server to open file
         try:
             response = requests.post(self.http_server + "/setup" + "/clear_task_files", headers=headers, data=payload)
-            if response.status_code == 200:
-                logger.info("Command executed successfully: %s", response.text)
-            else:
-                logger.error(f"Failed to clear task files. Status code: %s", response.text)
+            self._check_response(response)
+            logger.info("Command executed successfully: %s", response.text)
         except requests.exceptions.RequestException as e:
             logger.error("An error occurred while trying to send the request: %s", e)
+            raise
 
 
     def _close_window_setup(self, window_name: str, strict: bool = False, by_class: bool = False):
@@ -397,12 +416,11 @@ class SetupController:
         # send request to server to open file
         try:
             response = requests.post(self.http_server + "/setup" + "/close_window", headers=headers, data=payload)
-            if response.status_code == 200:
-                logger.info("Command executed successfully: %s", response.text)
-            else:
-                logger.error(f"Failed to close window {window_name}. Status code: %s", response.text)
+            self._check_response(response)
+            logger.info("Command executed successfully: %s", response.text)
         except requests.exceptions.RequestException as e:
             logger.error("An error occurred while trying to send the request: %s", e)
+            raise
 
     # File Explorer setup
     def _create_folder_setup(self, path: str):
@@ -417,12 +435,11 @@ class SetupController:
         # send request to server to create folder
         try:
             response = requests.post(self.http_server + "/setup" + "/create_folder", headers=headers, data=payload)
-            if response.status_code == 200:
-                logger.info("Command executed successfully: %s", response.text)
-            else:
-                logger.error("Failed to create folder. Status code: %s", response.text)
+            self._check_response(response)
+            logger.info("Command executed successfully: %s", response.text)
         except requests.exceptions.RequestException as e:
             logger.error("An error occurred while trying to send the request: %s", e)
+            raise
 
     def _create_file_setup(self, path: str, content: str = ""):
         if not path:
@@ -436,12 +453,11 @@ class SetupController:
         # send request to server to create text file
         try:
             response = requests.post(self.http_server + "/setup" + "/create_file", headers=headers, data=payload)
-            if response.status_code == 200:
-                logger.info("Command executed successfully: %s", response.text)
-            else:
-                logger.error("Failed to create file. Status code: %s", response.text)
+            self._check_response(response)
+            logger.info("Command executed successfully: %s", response.text)
         except requests.exceptions.RequestException as e:
             logger.error("An error occurred while trying to send the request: %s", e)
+            raise
 
 
     def _recycle_file_setup(self, path: str):
@@ -454,12 +470,11 @@ class SetupController:
         }
         try:
             response = requests.post(self.http_server + "/setup" + "/recycle", headers=headers, data=payload)
-            if response.status_code == 200:
-                logger.info("Command executed successfully: %s", response.text)
-            else:
-                logger.error("Failed to recycle file. Status code: %s", response.text)
+            self._check_response(response)
+            logger.info("Command executed successfully: %s", response.text)
         except requests.exceptions.RequestException as e:
             logger.error("An error occurred while trying to send the request: %s", e)
+            raise
 
     # Chrome setup
     def _chrome_open_tabs_setup(self, urls_to_open: List[str]):
@@ -480,7 +495,7 @@ class SetupController:
                     browser = p.chromium.connect_over_cdp(remote_debugging_url)
                     # break
                 except Exception as e:
-                    if attempt < 29:
+                    if attempt < 14:
                         logger.error(f"Attempt {attempt + 1}: Failed to connect, retrying. Error: {e}")
                         time.sleep(25)
                         continue
@@ -489,7 +504,7 @@ class SetupController:
                         raise e
 
                 if not browser:
-                    return
+                    raise RuntimeError("Chrome setup returned without a connected browser")
 
                 logger.info("Opening %s...", urls_to_open)
                 for i, url in enumerate(urls_to_open):
@@ -538,7 +553,7 @@ class SetupController:
                         raise e
 
                 if not browser:
-                    return
+                    raise RuntimeError("Edge setup returned without a connected browser")
 
                 logger.info("Opening %s...", urls_to_open)
                 for i, url in enumerate(urls_to_open):
@@ -562,6 +577,8 @@ class SetupController:
                 return browser, context
 
     def _chrome_close_tabs_setup(self, urls_to_close: List[str]):
+        from desktop_env.evaluators.metrics.utils import compare_urls
+
         time.sleep(5)  # Wait for Chrome to finish launching
 
         host = self.vm_ip
@@ -583,7 +600,7 @@ class SetupController:
                         raise e
 
             if not browser:
-                return
+                raise RuntimeError("Chrome setup returned without a connected browser")
 
             for i, url in enumerate(urls_to_close):
                 # Use the first context (which should be the only one if using default profile)
@@ -816,12 +833,11 @@ class SetupController:
         try:
             logger.debug("REQUEST ADDRESS: %s", self.http_server + "/setup" + "/upload")
             response = requests.post(self.http_server + "/setup" + "/upload", headers=headers, data=form)
-            if response.status_code == 200:
-                logger.info("Command executed successfully: %s", response.text)
-            else:
-                logger.error("Failed to upload file. Status code: %s", response.text)
+            self._check_response(response)
+            logger.info("Command executed successfully: %s", response.text)
         except requests.exceptions.RequestException as e:
             logger.error("An error occurred while trying to send the request: %s", e)
+            raise
         self._execute_setup(["sudo chown -R user:user /home/user/.config/microsoft-edge/Default/History"], shell=True)
 
     def _update_browse_history_setup(self, **config):
@@ -894,12 +910,11 @@ class SetupController:
         try:
             logger.debug("REQUEST ADDRESS: %s", self.http_server + "/setup" + "/upload")
             response = requests.post(self.http_server + "/setup" + "/upload", headers=headers, data=form)
-            if response.status_code == 200:
-                logger.info("Command executed successfully: %s", response.text)
-            else:
-                logger.error("Failed to upload file. Status code: %s", response.text)
+            self._check_response(response)
+            logger.info("Command executed successfully: %s", response.text)
         except requests.exceptions.RequestException as e:
             logger.error("An error occurred while trying to send the request: %s", e)
+            raise
 
         self._execute_setup(["sudo chown -R user:user /home/user/.config/google-chrome/Default/History"], shell=True)
 
