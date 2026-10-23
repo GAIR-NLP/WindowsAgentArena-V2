@@ -1,0 +1,10 @@
+{
+  "arms": {
+    "desktop": {
+      "command": ["C:\\mcp\\server.exe", "mcp"],
+      "powershell": {
+        "executable": "C:\\Program Files\\PowerShell\\7\\pwsh.exe"
+      }
+    }
+  }
+}
