@@ -25,6 +25,13 @@
         }
     },
     {
+      "type": "activate_window",
+      "parameters": {
+        "window_name": "flipped_1984_Apple_Macintosh_Commercial.mp4 - VLC media player",
+        "strict": true
+      }
+    },
+    {
       "type": "execute",
       "parameters": {
         "command": [

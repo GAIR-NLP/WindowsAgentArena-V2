@@ -30,6 +30,13 @@
       }
     },
     {
+      "type": "activate_window",
+      "parameters": {
+        "window_name": "Interstellar Movie - Interstellar Movie - Official Trailer - VLC media player",
+        "strict": true
+      }
+    },
+    {
       "type": "execute",
       "parameters": {
         "command": [
