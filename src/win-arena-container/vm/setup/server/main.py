@@ -1306,50 +1306,9 @@ def activate_window():
     os_name = platform.system()
 
     if os_name == 'Windows':
-        import pygetwindow as gw
+        from windows_window_activation import run_bounded
 
-        if by_class_name:
-            return "Get window by class name is currently not supported on Windows.", 500
-
-        windows: List[gw.Window] = gw.getWindowsWithTitle(window_name)
-        
-        # window: Optional[gw.Window] = None       
-        if len(windows) == 0:
-            return "Window {:} not found (empty results)".format(window_name), 404
-
-        if windows and strict:
-            window = windows[0]
-            window.minimize()
-            time.sleep(1)
-            window.restore()
-            time.sleep(1)
-            
-            assert window.isActive
-            # return f"ACTIVE? {window.title} is {window.isActive} active"
-    
-        # windows = []
-        # for w in gw.getAllWindows():
-        #     windows.append(w.title)
-                
-        # window: Optional[gw.Window] = None
-        # if len(windows) == 0:
-        #     return "Window {:} not found (empty results)".format(window_name), 404
-        # elif strict:
-        #     for wnd in windows:
-        #         if wnd.title == window_name:
-        #             window = wnd
-        #         #     return f"WINDOW ACT FOUND!! {window.title}", 999
-        #         # if wnd.title == wnd:
-        #         #     window = wnd
-        #     if window is None:
-        #         return "Window {:} not found (strict mode).".format(window_name), 404
-
-        # else:
-        #     window = windows[0]
-        #     # window.activate()
-        #     # return "Unstrict and windows exist, defaulting to first window {:}.".format(window_name), 200
-
-        # window.activate()
+        return run_bounded({"window_name": window_name, "strict": strict, "by_class": by_class_name})
 
     elif os_name == 'Darwin':
         import pygetwindow as gw
